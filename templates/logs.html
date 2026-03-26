@@ -1,0 +1,484 @@
+{% extends "base.html" %}
+
+{% block title %}Logs - OLX Tracker{% endblock %}
+
+{% block head_extra %}
+<script>
+    // Auto-refresh co 15 sekund - tylko gdy strona aktywna i modal zamknięty
+    let refreshInterval;
+    let countdownInterval;
+    let seconds = 15;
+    let isModalOpen = false;
+    let lastActivity = Date.now();
+    const REFRESH_DELAY = 15000;
+    const INACTIVITY_TIMEOUT = 30000; // Nie odświeżaj przez 30s po aktywności
+
+    function canRefresh() {
+        // Nie odświeżaj gdy modal otwarty
+        if (isModalOpen) return false;
+        // Nie odświeżaj gdy strona w tle
+        if (document.hidden) return false;
+        // Nie odświeżaj przez 30s po ostatniej aktywności
+        if (Date.now() - lastActivity < INACTIVITY_TIMEOUT) return false;
+        return true;
+    }
+
+    function doRefresh() {
+        if (canRefresh()) {
+            window.location.reload();
+        }
+    }
+
+    function resetActivity() {
+        lastActivity = Date.now();
+        seconds = 15; // Reset countdown
+    }
+
+    // Nasłuchiwanie aktywności użytkownika
+    document.addEventListener('mousemove', resetActivity);
+    document.addEventListener('keydown', resetActivity);
+    document.addEventListener('click', resetActivity);
+    document.addEventListener('scroll', resetActivity);
+
+    // Śledzenie widoczności strony
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            // Strona w tle - wstrzymaj odświeżanie
+            clearInterval(refreshInterval);
+            clearInterval(countdownInterval);
+        } else {
+            // Strona aktywna - wznów odświeżanie
+            startRefreshTimer();
+        }
+    });
+
+    function startRefreshTimer() {
+        clearInterval(refreshInterval);
+        clearInterval(countdownInterval);
+        
+        refreshInterval = setInterval(doRefresh, REFRESH_DELAY);
+        
+        countdownInterval = setInterval(function() {
+            seconds--;
+            if (seconds <= 0) seconds = 15;
+            console.log('Refresh in: ' + seconds + 's (modal: ' + isModalOpen + ', hidden: ' + document.hidden + ')');
+        }, 1000);
+    }
+
+    // Start timer przy załadowaniu
+    startRefreshTimer();
+
+    // Modal functions
+    function openLinkStatsModal() {
+        isModalOpen = true;
+        document.getElementById('linkStatsModal').style.display = 'flex';
+    }
+    
+    function closeLinkStatsModal() {
+        isModalOpen = false;
+        document.getElementById('linkStatsModal').style.display = 'none';
+    }
+    
+    function toggleOverallStats() {
+        const overallStats = document.getElementById('overallStats');
+        const btnText = document.getElementById('toggleOverallBtn');
+        
+        if (overallStats.style.display === 'none') {
+            overallStats.style.display = 'grid';
+            btnText.innerHTML = '<i class="fa-solid fa-chevron-up mr-2"></i>Hide Overall Stats';
+        } else {
+            overallStats.style.display = 'none';
+            btnText.innerHTML = '<i class="fa-solid fa-chart-pie mr-2"></i>Show Overall Stats';
+        }
+    }
+    
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+        const modal = document.getElementById('linkStatsModal');
+        if (event.target === modal) {
+            isModalOpen = false;
+            modal.style.display = 'none';
+        }
+    }
+</script>
+<style>
+    .stat-card-clickable {
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .stat-card-clickable:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+        border-color: rgba(59, 130, 246, 0.3);
+    }
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.8);
+        backdrop-filter: blur(8px);
+        z-index: 100;
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+    }
+    .modal-content {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        max-width: 700px;
+        width: 100%;
+        max-height: 80vh;
+        overflow-y: auto;
+        animation: modalFadeIn 0.3s ease;
+    }
+    @keyframes modalFadeIn {
+        from { opacity: 0; transform: scale(0.95); }
+        to { opacity: 1; transform: scale(1); }
+    }
+    .modal-header {
+        padding: 24px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .modal-body {
+        padding: 24px;
+    }
+    .close-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.03);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .close-btn:hover {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        border-color: rgba(239, 68, 68, 0.3);
+    }
+    .link-stat-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px;
+        border-radius: 12px;
+        background: rgba(255,255,255,0.02);
+        margin-bottom: 12px;
+        border: 1px solid var(--border);
+    }
+    .link-stat-row:last-child {
+        margin-bottom: 0;
+    }
+    .link-stat-name {
+        font-weight: 600;
+        color: var(--text-primary);
+        flex: 1;
+    }
+    .link-stat-badges {
+        display: flex;
+        gap: 8px;
+    }
+    .link-stat-badge {
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .link-stat-total { background: rgba(255,255,255,0.1); color: #fff; }
+    .link-stat-success { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+    .link-stat-no_new { background: rgba(234, 179, 8, 0.15); color: #eab308; }
+    .link-stat-error { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+    .toggle-btn {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 20px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+    }
+    .toggle-btn:hover {
+        background: rgba(255,255,255,0.08);
+        color: var(--text-primary);
+    }
+    .date-label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Today's Stats Cards (klikalne) -->
+<div class="mb-2">
+    <div class="date-label">Today's Activity ({{ (now() | poland_time).strftime('%d.%m.%Y') }})</div>
+</div>
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4 animate-fade-in">
+    <div class="glass-card p-5 stat-card-clickable" onclick="openLinkStatsModal()">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
+                <i class="fa-solid fa-chart-line text-white/50"></i>
+            </div>
+            <span class="text-white/40 text-sm font-medium">Total Runs</span>
+        </div>
+        <div class="text-3xl font-bold text-white">{{ today_stats.total }}</div>
+        <div class="text-white/30 text-xs mt-2">Click for details by link</div>
+    </div>
+    
+    <div class="glass-card p-5 stat-card-clickable" onclick="openLinkStatsModal()">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-xl bg-green-500/10 flex items-center justify-center">
+                <i class="fa-solid fa-check text-green-400"></i>
+            </div>
+            <span class="text-green-400/70 text-sm font-medium">Success</span>
+        </div>
+        <div class="text-3xl font-bold text-green-400">{{ today_stats.success }}</div>
+    </div>
+    
+    <div class="glass-card p-5 stat-card-clickable" onclick="openLinkStatsModal()">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center">
+                <i class="fa-solid fa-minus text-yellow-400"></i>
+            </div>
+            <span class="text-yellow-400/70 text-sm font-medium">No New</span>
+        </div>
+        <div class="text-3xl font-bold text-yellow-400">{{ today_stats.no_new }}</div>
+    </div>
+    
+    <div class="glass-card p-5 stat-card-clickable" onclick="openLinkStatsModal()">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center">
+                <i class="fa-solid fa-triangle-exclamation text-red-400"></i>
+            </div>
+            <span class="text-red-400/70 text-sm font-medium">Errors</span>
+        </div>
+        <div class="text-3xl font-bold text-red-400">{{ today_stats.errors }}</div>
+    </div>
+</div>
+
+<!-- Today's Date Header -->
+<div class="mb-4 animate-fade-in" style="animation-delay: 0.05s;">
+    <h2 class="text-lg font-semibold text-white/90">
+        <i class="fa-solid fa-calendar-day mr-2 text-[#3b82f6]"></i>
+        Today {{ (now() | poland_time).strftime('%d.%m.%Y') }}
+    </h2>
+</div>
+
+<!-- Toggle Overall Stats Button -->
+<div class="mb-6 animate-fade-in" style="animation-delay: 0.1s;">
+    <button onclick="toggleOverallStats()" id="toggleOverallBtn" class="toggle-btn">
+        <i class="fa-solid fa-chart-pie mr-2"></i>Show Overall Stats
+    </button>
+</div>
+
+<!-- Overall Stats Cards (hidden by default) -->
+<div id="overallStats" class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 animate-fade-in" style="display: none;">
+    <div class="glass-card p-5 opacity-70">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
+                <i class="fa-solid fa-infinity text-white/30"></i>
+            </div>
+            <span class="text-white/30 text-sm font-medium">All Time Total</span>
+        </div>
+        <div class="text-3xl font-bold text-white/70">{{ overall_stats.total }}</div>
+    </div>
+    
+    <div class="glass-card p-5 opacity-70">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-xl bg-green-500/10 flex items-center justify-center">
+                <i class="fa-solid fa-check text-green-400/70"></i>
+            </div>
+            <span class="text-green-400/50 text-sm font-medium">All Time Success</span>
+        </div>
+        <div class="text-3xl font-bold text-green-400/70">{{ overall_stats.success }}</div>
+    </div>
+    
+    <div class="glass-card p-5 opacity-70">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center">
+                <i class="fa-solid fa-minus text-yellow-400/70"></i>
+            </div>
+            <span class="text-yellow-400/50 text-sm font-medium">All Time No New</span>
+        </div>
+        <div class="text-3xl font-bold text-yellow-400/70">{{ overall_stats.no_new }}</div>
+    </div>
+    
+    <div class="glass-card p-5 opacity-70">
+        <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center">
+                <i class="fa-solid fa-triangle-exclamation text-red-400/70"></i>
+            </div>
+            <span class="text-red-400/50 text-sm font-medium">All Time Errors</span>
+        </div>
+        <div class="text-3xl font-bold text-red-400/70">{{ overall_stats.errors }}</div>
+    </div>
+</div>
+
+<!-- Modal for Link Stats -->
+<div id="linkStatsModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div>
+                <h3 class="text-xl font-bold text-white">Statistics by Link</h3>
+                <p class="text-white/40 text-sm">Today's activity breakdown</p>
+            </div>
+            <button class="close-btn" onclick="closeLinkStatsModal()">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            {% if link_stats %}
+                {% for ls in link_stats %}
+                <div class="link-stat-row">
+                    <div class="link-stat-name">{{ ls.name }}</div>
+                    <div class="link-stat-badges">
+                        <span class="link-stat-badge link-stat-total" title="Total runs">{{ ls.total }}</span>
+                        {% if ls.success > 0 %}
+                        <span class="link-stat-badge link-stat-success" title="Success">{{ ls.success }}</span>
+                        {% endif %}
+                        {% if ls.no_new > 0 %}
+                        <span class="link-stat-badge link-stat-no_new" title="No new items">{{ ls.no_new }}</span>
+                        {% endif %}
+                        {% if ls.errors > 0 %}
+                        <span class="link-stat-badge link-stat-error" title="Errors">{{ ls.errors }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="text-center py-8 text-white/40">
+                    <i class="fa-solid fa-link-slash text-4xl mb-3"></i>
+                    <p>No links configured</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Logs Table -->
+<div class="animate-fade-in" style="animation-delay: 0.2s;">
+    <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
+                <i class="fa-solid fa-list-ul text-white/60"></i>
+            </div>
+            <div>
+                <h2 class="font-semibold text-white">Activity Log</h2>
+                <p class="text-white/40 text-sm">Recent scraping operations</p>
+            </div>
+        </div>
+        <span class="text-white/30 text-xs">Last 100 entries</span>
+    </div>
+    
+    {% if logs %}
+    <div class="glass-card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b border-white/5">
+                        <th class="text-left py-4 px-6 text-white/40 text-xs font-semibold uppercase tracking-wider">Time</th>
+                        <th class="text-left py-4 px-6 text-white/40 text-xs font-semibold uppercase tracking-wider">Link</th>
+                        <th class="text-left py-4 px-6 text-white/40 text-xs font-semibold uppercase tracking-wider">Status</th>
+                        <th class="text-center py-4 px-6 text-white/40 text-xs font-semibold uppercase tracking-wider">Found</th>
+                        <th class="text-center py-4 px-6 text-white/40 text-xs font-semibold uppercase tracking-wider">Posted</th>
+                        <th class="text-right py-4 px-6 text-white/40 text-xs font-semibold uppercase tracking-wider">Duration</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-white/5">
+                    {% for log in logs %}
+                    <tr class="hover:bg-white/[0.02] transition-colors group">
+                        <td class="py-4 px-6">
+                            <div class="flex flex-col">
+                                <span class="text-white/90 font-medium">{{ (log.created_at | poland_time).strftime('%H:%M:%S') }}</span>
+                                <span class="text-white/30 text-xs">{{ (log.created_at | poland_time).strftime('%d.%m.%Y') }}</span>
+                            </div>
+                        </td>
+                        <td class="py-4 px-6">
+                            <span class="text-white/80 font-medium truncate max-w-[150px] block" title="{{ log.tracking_link.name if log.tracking_link else 'Deleted' }}">
+                                {{ log.tracking_link.name if log.tracking_link else 'Deleted' }}
+                            </span>
+                        </td>
+                        <td class="py-4 px-6">
+                            {% if log.status == 'success' %}
+                            <span class="stat-badge stat-success">
+                                <i class="fa-solid fa-check text-xs"></i>
+                                Success
+                            </span>
+                            {% elif log.status == 'partial' %}
+                            <span class="stat-badge stat-warning">
+                                <i class="fa-solid fa-exclamation text-xs"></i>
+                                Partial
+                            </span>
+                            {% elif log.status == 'no_new' %}
+                            <span class="stat-badge" style="background: rgba(59, 130, 246, 0.1); color: #60a5fa;">
+                                <i class="fa-solid fa-minus text-xs"></i>
+                                No New
+                            </span>
+                            {% else %}
+                            <span class="stat-badge stat-error" title="{{ log.error_message or '' }}">
+                                <i class="fa-solid fa-xmark text-xs"></i>
+                                Error
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="py-4 px-6 text-center">
+                            <span class="text-white/60 font-medium">{{ log.items_found }}</span>
+                        </td>
+                        <td class="py-4 px-6 text-center">
+                            <span class="{% if log.items_posted > 0 %}text-green-400{% else %}text-white/40{% endif %} font-medium">
+                                {{ log.items_posted }}
+                            </span>
+                        </td>
+                        <td class="py-4 px-6 text-right">
+                            {% if log.execution_time_ms %}
+                            <span class="text-white/40 text-sm">{{ log.execution_time_ms }}ms</span>
+                            {% else %}
+                            <span class="text-white/20 text-sm">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% if log.error_message and log.status == 'error' %}
+                    <tr class="bg-red-500/5">
+                        <td colspan="6" class="py-3 px-6">
+                            <div class="flex items-start gap-2 text-red-400/80 text-sm">
+                                <i class="fa-solid fa-circle-info mt-1 text-xs"></i>
+                                <span class="font-mono text-xs">{{ log.error_message }}</span>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="glass-card empty-state">
+        <div class="empty-state-icon">
+            <i class="fa-solid fa-clipboard-list"></i>
+        </div>
+        <h3 class="text-white font-semibold mb-2">No activity yet</h3>
+        <p class="text-white/40 text-sm">Logs will appear after scraping runs</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
