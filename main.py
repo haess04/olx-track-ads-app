@@ -152,10 +152,13 @@ app.add_middleware(BasicAuthMiddleware)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
     """Health check endpoint for keep-alive (Render)"""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    return {
+        "status": "ok",
+        "timestamp": datetime.now(datetime.now().astimezone().tzinfo).isoformat(),
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -396,5 +399,6 @@ async def ads_page(request: Request, db: Session = Depends(get_db)):
 if __name__ == "__main__":
     import uvicorn
     import os
+
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
