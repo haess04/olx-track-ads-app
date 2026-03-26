@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from sqlalchemy import (
     create_engine,
@@ -90,11 +91,29 @@ class Ad(Base):
     tracking_link = relationship("TrackingLink", backref="ads")
 
 
-# Database setup
-DATABASE_PATH = Path(__file__).parent / "olx_tracker.db"
-DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
+# Database setup - SQLite locally, PostgreSQL on Render
+def get_database_url():
+    """Get database URL from environment or default to SQLite."""
+    database_url = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+    if database_url:
+        # Render uses postgres:// but SQLAlchemy requires postgresql://
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
+        return database_url
+
+    # Default to SQLite for local development
+    database_path = Path(__file__).parent / "olx_tracker.db"
+    return f"sqlite:///{database_path}"
+
+
+DATABASE_URL = get_database_url()
+
+# Create engine with appropriate settings for SQLite or PostgreSQL
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
