@@ -46,12 +46,25 @@ def run_scraping_job(tracking_link_id: int):
             .filter(SeenItem.tracking_link_id == tracking_link_id)
             .all()
         )
+        logger.info(
+            "run_scraping_job[%s]: start seen_count=%d",
+            tracking_link_id,
+            len(seen_ids),
+        )
 
         # Scrape with full details for new items
         all_items, new_items, error_msg = scrape_ads_with_details(
             url=str(link.url),
             num_items=int(link.num_items),
             existing_ids=seen_ids,
+        )
+        logger.info(
+            "run_scraping_job[%s]: scraped all_items=%d new_items=%d all_ids=%s new_ids=%s",
+            tracking_link_id,
+            len(all_items),
+            len(new_items),
+            [i.get("id") for i in all_items],
+            [i.get("id") for i in new_items],
         )
 
         execution_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
@@ -87,10 +100,26 @@ def run_scraping_job(tracking_link_id: int):
             return
 
         # Post to Discord
-        posted_count, errors = post_to_discord(new_items, str(link.webhook_url))
+        posted_count, errors, posted_ids, failed_ids = post_to_discord(
+            new_items, str(link.webhook_url)
+        )
+        logger.info(
+            "run_scraping_job[%s]: discord posted_count=%d errors=%d posted_ids=%s failed_ids=%s",
+            tracking_link_id,
+            posted_count,
+            len(errors),
+            posted_ids,
+            failed_ids,
+        )
 
         # Save seen items and full ad details
         for item in new_items:
+            logger.info(
+                "run_scraping_job[%s]: mark_seen id=%s title=%s",
+                tracking_link_id,
+                item.get("id"),
+                str(item.get("title", ""))[:80],
+            )
             # Save to SeenItem
             seen = SeenItem(
                 tracking_link_id=tracking_link_id,

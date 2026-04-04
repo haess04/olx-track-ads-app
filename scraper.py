@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 
 # Configure logging
 logging.basicConfig(
@@ -61,7 +62,13 @@ def http_get(url: str, retries: int = 3, timeout: int = 15) -> Optional[str]:
     return None
 
 
-def is_featured(card: BeautifulSoup) -> bool:
+def _attr_str(value) -> str:
+    if isinstance(value, list):
+        return value[0] if value else ""
+    return value or ""
+
+
+def is_featured(card: Tag) -> bool:
     lab = card.select_one(".css-144z9p2, .css-10iz5lf, [class*='highlight']")
     if lab and "wyróżnione" in lab.get_text(strip=True).lower():
         return True
@@ -124,18 +131,37 @@ def parse_cards(html: str, limit: int) -> List[Dict]:
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select('div[data-cy="l-card"][data-testid="l-card"]')
     results: List[Dict] = []
+    featured_ids: List[str] = []
 
-    for card in cards:
-        if is_featured(card):
+    logger.info("parse_cards: raw_cards_found=%d limit=%d", len(cards), limit)
+
+    for idx, card in enumerate(cards, 1):
+        card_id = _attr_str(card.get("id")).strip()
+        card_text = card.get_text(" ", strip=True).lower()
+        featured_by_keyword = "wyróżnione" in card_text
+        featured_by_selector = bool(
+            card.select_one(".css-144z9p2, .css-10iz5lf, [class*='highlight']")
+        )
+        featured = is_featured(card)
+
+        if featured:
+            featured_ids.append(card_id or f"idx:{idx}")
+            logger.info(
+                "parse_cards: skip_featured idx=%d id=%s by_keyword=%s by_selector=%s",
+                idx,
+                card_id or "(no-id)",
+                featured_by_keyword,
+                featured_by_selector,
+            )
             continue
 
         a = card.select_one("a[href]")
         if not a:
             continue
-        raw_url = (a.get("href") or "").strip()
+        raw_url = _attr_str(a.get("href")).strip()
         url = urljoin(BASE, raw_url)
 
-        ad_id = (card.get("id") or url).strip()
+        ad_id = (_attr_str(card.get("id")) or url).strip()
 
         title_tag = card.select_one('[data-cy="ad-card-title"] h4') or card.select_one(
             "h4"
@@ -150,7 +176,7 @@ def parse_cards(html: str, limit: int) -> List[Dict]:
         location = loc_date_text.split(" - ")[0] if " - " in loc_date_text else "—"
 
         img = card.select_one("img")
-        thumb_raw = (img.get("src") or img.get("data-src")) if img else None
+        thumb_raw = _attr_str(img.get("src") or img.get("data-src")) if img else None
         thumb = urljoin(BASE, thumb_raw) if thumb_raw else None
 
         display_time = plus2h_display(loc_date_text)
@@ -167,8 +193,23 @@ def parse_cards(html: str, limit: int) -> List[Dict]:
             }
         )
 
+        logger.info(
+            "parse_cards: keep idx=%d id=%s title=%s",
+            idx,
+            ad_id,
+            title[:80],
+        )
+
         if len(results) >= limit:
             break
+
+    logger.info(
+        "parse_cards: done kept=%d skipped_featured=%d kept_ids=%s featured_ids=%s",
+        len(results),
+        len(featured_ids),
+        [r.get("id") for r in results],
+        featured_ids,
+    )
 
     return results
 
@@ -232,21 +273,50 @@ def scrape_and_notify(
     return cards, new_items, None
 
 
-def post_to_discord(items: List[Dict], webhook: str) -> Tuple[int, List[str]]:
+def post_to_discord(
+    items: List[Dict], webhook: str
+) -> Tuple[int, List[str], List[str], List[str]]:
     """
-    Returns: (posted_count, errors)
+    Returns: (posted_count, errors, posted_ids, failed_ids)
     """
     posted = 0
     errors = []
+    posted_ids: List[str] = []
+    failed_ids: List[str] = []
+
+    logger.info("post_to_discord: start items=%d", len(items))
 
     for item in items:
+        item_id = str(item.get("id", ""))
+        item_title = str(item.get("title", ""))[:80]
+
         if send_discord(webhook, item):
             posted += 1
+            posted_ids.append(item_id)
+            logger.info(
+                "post_to_discord: posted id=%s title=%s",
+                item_id,
+                item_title,
+            )
             time.sleep(0.5)  # Rate limiting
         else:
             errors.append(f"Failed to post: {item.get('title', 'Unknown')}")
+            failed_ids.append(item_id)
+            logger.info(
+                "post_to_discord: failed id=%s title=%s",
+                item_id,
+                item_title,
+            )
 
-    return posted, errors
+    logger.info(
+        "post_to_discord: done posted=%d failed=%d posted_ids=%s failed_ids=%s",
+        posted,
+        len(failed_ids),
+        posted_ids,
+        failed_ids,
+    )
+
+    return posted, errors, posted_ids, failed_ids
 
 
 def parse_ad_details(ad_url: str) -> Dict:
@@ -292,6 +362,7 @@ def parse_ad_details(ad_url: str) -> Dict:
         imgs = soup.select(sel)
         for img in imgs:
             src = img.get("src") or img.get("data-src") or img.get("data-lazy")
+            src = _attr_str(src)
             if src and src.startswith("http"):
                 # Remove compression params to get full resolution
                 src = re.sub(r";s=\d+x\d+", "", src)
@@ -307,6 +378,7 @@ def parse_ad_details(ad_url: str) -> Dict:
     if not image_urls:
         for img in soup.find_all("img"):
             src = img.get("src") or img.get("data-src")
+            src = _attr_str(src)
             if src and "olxcdn.com" in src and "image" in src:
                 # Filter for larger images only
                 if src not in image_urls:
@@ -369,6 +441,12 @@ def scrape_ads_with_details(
 
     # Find new items
     new_items = [c for c in cards if c["id"] not in existing_ids]
+    logger.info(
+        "scrape_ads_with_details: cards_ids=%s existing_count=%d new_ids=%s",
+        [c.get("id") for c in cards],
+        len(existing_ids),
+        [c.get("id") for c in new_items],
+    )
 
     # Fetch details for new items only
     new_items_with_details = []

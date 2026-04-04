@@ -359,14 +359,26 @@ async def ads_page(request: Request, db: Session = Depends(get_db)):
     """Display last 50 ads with images and details"""
     # Get last 50 ads ordered by creation date
     ads = db.query(Ad).order_by(Ad.created_at.desc()).limit(50).all()
+    ads_with_parsed_images = serialize_ads(ads)
 
-    # Convert to plain dictionaries for JSON serialization
+    return templates.TemplateResponse(
+        "ads.html",
+        {
+            "request": request,
+            "ads": ads_with_parsed_images,
+        },
+    )
+
+
+def serialize_ads(ads: list[Ad]) -> list[dict]:
+    """Convert Ad ORM objects to JSON-safe dictionaries used by UI/API."""
     ads_with_parsed_images = []
     for ad in ads:
         try:
             image_urls = json.loads(ad.image_urls) if ad.image_urls else []
-        except:
+        except Exception:
             image_urls = []
+
         # Use first image from gallery as main image (better quality)
         main_image = image_urls[0] if image_urls else ad.main_image_url
         ads_with_parsed_images.append(
@@ -386,14 +398,15 @@ async def ads_page(request: Request, db: Session = Depends(get_db)):
                 "image_urls": image_urls,
             }
         )
+    return ads_with_parsed_images
 
-    return templates.TemplateResponse(
-        "ads.html",
-        {
-            "request": request,
-            "ads": ads_with_parsed_images,
-        },
-    )
+
+@app.get("/api/ads/latest")
+async def ads_latest_api(db: Session = Depends(get_db)):
+    """JSON endpoint for auto-refreshing Ads page without full page reload."""
+    ads = db.query(Ad).order_by(Ad.created_at.desc()).limit(50).all()
+    payload = serialize_ads(ads)
+    return {"count": len(payload), "ads": payload}
 
 
 if __name__ == "__main__":
